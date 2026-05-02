@@ -56,7 +56,39 @@ proxies/          ← Thin proxy between AppService and Service (for future logg
 services/         ← Business logic + SQLAlchemy models + DB operations
 workers/          ← Celery tasks (async bridge via asyncio.run())
 core/             ← Shared: database engine, session factory, Base model
-config/           ← Settings loaded from .env
+config/           ← App config, router registration, and settings
+middleware/       ← Request logging and CORS — applied globally via config/app_routers.py
+```
+
+### Sub-app mounting (CAS pattern)
+
+Each domain is a completely independent FastAPI app mounted under the main app. This gives every domain its own Swagger docs page and keeps `main.py` clean no matter how many domains are added.
+
+```python
+# main.py
+app.mount("/app/v1/claims", claims_app)   # own Swagger at /app/v1/claims/docs
+app.mount("/app/v1/health", health_app)   # own Swagger at /app/v1/health/docs
+
+load_middleware(app)
+```
+
+Adding a new domain = create a new sub-app, mount it, done. One line in `main.py`.
+
+### config/app_config.py
+
+Pydantic model for each sub-app's FastAPI config (title, version, servers, contact). Keeps configuration out of the domain code.
+
+### config/app_routers.py
+
+Central wiring file. All router loaders and all middleware registration live here:
+
+```python
+def load_claims_routers(app): app.include_router(claim_router)
+def load_health_routers(app): app.include_router(health_router)
+
+def load_middleware(app):
+    app.add_middleware(BaseHTTPMiddleware, dispatch=cors_middleware)
+    app.add_middleware(BaseHTTPMiddleware, dispatch=log_middleware)
 ```
 
 ### Layer responsibilities
@@ -85,6 +117,8 @@ async-claims-worker-demo/
 ├── seed.py                          # Idempotent database seeder
 │
 ├── config/
+│   ├── app_config.py                # Pydantic config classes per sub-app (title, version, servers)
+│   ├── app_routers.py               # Router loaders + middleware registration (central wiring)
 │   ├── app_settings.py              # Reads .env into a dict via dotenv
 │   └── configuration.py            # Pydantic BaseSettings typed object
 │
@@ -92,23 +126,38 @@ async-claims-worker-demo/
 │   └── database/
 │       └── db_context.py           # Async engine (NullPool), session factory, Base, model registry
 │
+├── middleware/
+│   ├── request_logging.py          # Logs every request: method, path, status, duration
+│   └── cors_middleware.py          # Sets CORS headers on every response
+│
 ├── domains/
-│   └── claims/
-│       ├── app.py                  # FastAPI app with router included
-│       ├── routers/                # HTTP route definitions
-│       ├── controllers/            # Thin delegation layer
-│       ├── app_services/           # Workflow coordination
-│       └── models/                 # Pydantic request/response models
+│   ├── claims/
+│   │   ├── app.py                  # Claims FastAPI sub-app
+│   │   ├── routers/                # HTTP route definitions
+│   │   ├── controllers/            # Thin delegation layer
+│   │   ├── app_services/           # Workflow coordination
+│   │   └── models/                 # Pydantic request/response models
+│   └── health/
+│       ├── app.py                  # Health FastAPI sub-app
+│       └── routers/
+│           └── health_router.py    # GET /health — checks DB, RabbitMQ, Redis
 │
 ├── proxies/
-│   └── claims/
-│       └── claim_service_proxy.py  # Proxy wrapping ClaimService
+│   ├── claims/
+│   │   └── claim_service_proxy.py  # Proxy wrapping ClaimService
+│   └── health/
+│       └── health_service_proxy.py # Proxy wrapping HealthService
 │
 ├── services/
 │   ├── claims/
 │   │   ├── claim_service.py        # save_claim, get_claim, update_claim_status
 │   │   ├── contracts/              # IClaimService interface (ABC)
 │   │   └── database/               # Claim + ClaimItem SQLAlchemy models
+│   ├── health/
+│   │   ├── health_service.py       # Runs all 3 health checks, returns 200/503
+│   │   ├── contracts/              # IHealthService interface (ABC)
+│   │   └── helpers/
+│   │       └── health_check.py     # check_database, check_rabbitmq, check_redis
 │   ├── members/
 │   │   └── database/               # Member model (member_number, status, product_code)
 │   ├── providers/
@@ -311,10 +360,33 @@ GET http://localhost:8000/app/v1/claims/status/{claim_id}
 }
 ```
 
-### Swagger UI
+### Health check
 
 ```
-http://localhost:8000/docs
+GET http://localhost:8000/app/v1/health
+```
+
+**Response:**
+```json
+{
+  "is_healthy": true,
+  "checks": {
+    "database": "OK",
+    "rabbitmq": "OK (localhost:5672)",
+    "redis": "OK"
+  }
+}
+```
+
+Returns `503 Service Unavailable` if any dependency is down.
+
+### Swagger UI
+
+Each domain has its own Swagger docs:
+
+```
+http://localhost:8000/app/v1/claims/docs   ← Claims endpoints
+http://localhost:8000/app/v1/health/docs   ← Health endpoint
 ```
 
 ---
@@ -371,7 +443,13 @@ Each stage of the pipeline (validate, adjudicate, notify) runs on a dedicated qu
 The proxy (`ClaimServiceProxy`) sits between `ClaimAppService` and `ClaimService`. Today it delegates everything. In production it is the right place to add structured logging, performance metrics, circuit breakers, or caching without modifying the service.
 
 ### Why contracts (interfaces)?
-All services implement an ABC interface (`IClaimService`). This enforces the contract — any class that claims to be a `ClaimService` must implement `save_claim`, `get_claim`, and `update_claim_status`. It also makes the proxy and app service testable with mock implementations.
+All services implement an ABC interface (`IClaimService`, `IHealthService`). This enforces the contract — any class that claims to be a `ClaimService` must implement `save_claim`, `get_claim`, and `update_claim_status`. It also makes the proxy and app service testable with mock implementations.
+
+### Why sub-app mounting?
+Each domain (`claims`, `health`) is a fully independent FastAPI app. This gives every domain its own Swagger docs page and means adding a new domain never requires touching `main.py` beyond one `app.mount()` call. Identical to how CAS handles its 12+ domains.
+
+### Why a central middleware file?
+All middleware (`CORSMiddleware`, `RequestLogging`) is registered in `config/app_routers.py → load_middleware()`. One place to look, one place to add new middleware. Never scattered across domain files.
 
 ---
 
@@ -404,3 +482,6 @@ This project demonstrates:
 - **FastAPI** — routers, dependency injection, Pydantic models
 - **Event-driven architecture** — decoupled pipeline where each stage only knows about the next
 - **Idempotent seeding** — safe to run `make seed` multiple times without duplicates
+- **Sub-app mounting** — each domain is an independent FastAPI app with its own Swagger docs
+- **Middleware pattern** — CORS and request logging registered centrally, applied globally
+- **Health checks** — real connection tests against PostgreSQL, RabbitMQ, and Redis via contract → service → proxy chain

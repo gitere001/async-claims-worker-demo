@@ -9,3 +9,4 @@ python-dotenv
 flower
 alembic
 pika
+starlette

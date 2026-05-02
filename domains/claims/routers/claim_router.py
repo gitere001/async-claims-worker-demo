@@ -10,7 +10,7 @@ from domains.claims.models.claim_models import (
 )
 from proxies.claims.claim_service_proxy import ClaimServiceProxy
 
-router = APIRouter(prefix="/claims", tags=["Claims"])
+router = APIRouter(tags=["Claims"])
 
 
 def get_controller() -> ClaimController:

@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 from proxies.health.health_service_proxy import HealthServiceProxy
 
-router = APIRouter(prefix="/health", tags=["Health"])
+router = APIRouter(tags=["Health"])
 
 
 @router.get("")
