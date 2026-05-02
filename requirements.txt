@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+celery[redis]
+redis
+sqlalchemy[asyncio]
+asyncpg
+pydantic-settings
+python-dotenv
+flower
+alembic

@@ -1,0 +1,12 @@
+version: "3.8"
+
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: claims_rabbitmq
+    ports:
+      - "5672:5672"      # Celery connects here
+      - "15672:15672"    # Browser dashboard → http://localhost:15672
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
