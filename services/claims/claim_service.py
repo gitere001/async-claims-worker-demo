@@ -20,7 +20,6 @@ class ClaimService(IClaimService):
                 status=ClaimStatus.PENDING,
             )
             ctx.session.add(claim)
-            await ctx.session.flush()  # writes claim row, gets the id
 
             for item in data.get("items", []):
                 claim_item = ClaimItem(

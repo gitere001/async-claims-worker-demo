@@ -5,7 +5,7 @@ from uuid import UUID
 from celery import shared_task
 from sqlalchemy import select
 
-from core.database.db_context import AsyncSessionLocal
+from core.database.db_context import WorkerSessionLocal as AsyncSessionLocal
 from services.claims.database.claim_model import Claim, ClaimStatus
 from services.members.database.member_model import Member, MemberStatus
 from services.providers.database.provider_model import ServiceProvider

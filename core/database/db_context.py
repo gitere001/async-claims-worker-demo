@@ -3,13 +3,32 @@ from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.pool import NullPool
 from config.configuration import settings
 
-# NullPool is required for Celery workers: each asyncio.run() call creates a new
-# event loop, and a persistent connection pool binds connections to the old loop,
-# causing "Future attached to a different loop" errors.
-engine = create_async_engine(settings.DATABASE_URL, echo=True, poolclass=NullPool)
+# API engine — connection pool keeps connections warm so Neon never cold-starts
+# and the dialect probe queries (pg_catalog.version etc.) only run once.
+# FastAPI runs in a single event loop so pooling is safe here.
+engine = create_async_engine(
+    settings.DATABASE_URL,
+    echo=True,
+    pool_size=5,
+    max_overflow=10,
+    pool_pre_ping=True,
+)
+
+# Worker engine — NullPool required for Celery tasks.
+# Each asyncio.run() creates a new event loop; a pooled connection bound to the
+# previous loop raises "Future attached to a different loop".
+worker_engine = create_async_engine(
+    settings.DATABASE_URL,
+    echo=True,
+    poolclass=NullPool,
+)
 
 AsyncSessionLocal = async_sessionmaker(
     engine, class_=AsyncSession, expire_on_commit=False
+)
+
+WorkerSessionLocal = async_sessionmaker(
+    worker_engine, class_=AsyncSession, expire_on_commit=False
 )
 
 
