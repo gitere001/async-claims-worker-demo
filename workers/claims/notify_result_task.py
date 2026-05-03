@@ -8,8 +8,11 @@ from sqlalchemy import select
 from core.database.db_context import WorkerSessionLocal as AsyncSessionLocal
 from repositories.claims.database.claim_model import Claim, ClaimStatus
 from workers.core.base_task import TaskBase
+from workers.core.exceptions import NonRetryableError, RetryableError
 
 logger = logging.getLogger(__name__)
+
+_TERMINAL_STATUSES = {ClaimStatus.APPROVED, ClaimStatus.REJECTED, ClaimStatus.FAILED}
 
 
 async def _notify(claim_data: dict) -> None:
@@ -24,17 +27,30 @@ async def _notify(claim_data: dict) -> None:
             select(Claim).where(Claim.id == claim_id)
         )).scalar_one_or_none()
 
-        if claim:
-            claim.status = ClaimStatus[adjudication_result] if adjudication_result in ClaimStatus.__members__ else ClaimStatus.APPROVED
-            await session.commit()
+        if not claim:
+            raise NonRetryableError(f"Claim {claim_id} not found in database — payload is corrupt")
+
+        if claim.status in _TERMINAL_STATUSES:
+            logger.warning(
+                "IDEMPOTENCY GUARD | notify_result | claim=%s already at %s — skipping",
+                claim_id, claim.status.value,
+            )
+            return
+
+        claim.status = (
+            ClaimStatus[adjudication_result]
+            if adjudication_result in ClaimStatus.__members__
+            else ClaimStatus.APPROVED
+        )
+        await session.commit()
 
     logger.info("=" * 60)
-    logger.info(f"  CLAIM PROCESSED")
-    logger.info(f"  Claim ID  : {claim_id}")
-    logger.info(f"  Member    : {member_number}")
-    logger.info(f"  Provider  : {provider_code}")
-    logger.info(f"  Result    : {adjudication_result}")
-    logger.info(f"  Amount    : KES {approved_amount:,.2f}")
+    logger.info("  CLAIM PROCESSED")
+    logger.info("  Claim ID  : %s", claim_id)
+    logger.info("  Member    : %s", member_number)
+    logger.info("  Provider  : %s", provider_code)
+    logger.info("  Result    : %s", adjudication_result)
+    logger.info("  Amount    : KES %s", f"{approved_amount:,.2f}")
     logger.info("=" * 60)
 
 
@@ -42,5 +58,7 @@ async def _notify(claim_data: dict) -> None:
 def notify_result_task(self: TaskBase, claim_data: dict) -> None:
     try:
         asyncio.run(_notify(claim_data))
+    except (NonRetryableError, RetryableError):
+        raise
     except Exception as e:
-        logger.error(f"NOTIFY FAILED | {e}")
+        raise RetryableError(str(e)) from e

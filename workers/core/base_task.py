@@ -1,22 +1,20 @@
 import asyncio
 import logging
 from celery import Task
-from celery.exceptions import Reject
+from workers.core.exceptions import RetryableError
 
 logger = logging.getLogger(__name__)
 
 
 class TaskBase(Task):
+    # Retry only infrastructure failures — business failures never retry
+    autoretry_for = (RetryableError,)
     max_retries = 5
-    retry_backoff = True
-    retry_jitter = True
+    retry_backoff = 30        # first retry after ~30s
+    retry_backoff_max = 300   # cap at 5 minutes
+    retry_jitter = True       # adds randomness to avoid thundering herd
     acks_late = True
     reject_on_worker_lost = True
-
-    def retry_task(self, exception=None):
-        if self.request.retries >= self.max_retries:
-            raise Reject(exception, requeue=False)
-        raise self.retry(exc=exception, countdown=10)
 
     def on_failure(self, exc, task_id, args, kwargs, einfo):
         payload = args[0] if args else {}

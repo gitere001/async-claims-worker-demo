@@ -25,3 +25,13 @@ class ProviderNotFoundException(AppException):
 class ValidationException(AppException):
     status_code = 422
     message = "Validation failed"
+
+
+class FailedTaskNotFoundException(AppException):
+    status_code = 404
+    message = "Failed task not found"
+
+
+class ReplayException(AppException):
+    status_code = 422
+    message = "Cannot replay this task"

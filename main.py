@@ -15,6 +15,7 @@ from core.exceptions.exception_handlers import (
     unhandled_exception_handler,
     validation_exception_handler,
 )
+from domains.admin.app import router as admin_router
 from domains.claims.app import router as claims_router
 from domains.health.app import router as health_router
 from worker import app as celery_app  # noqa: F401 — initialises Celery on startup
@@ -30,6 +31,7 @@ app.add_exception_handler(Exception, unhandled_exception_handler)
 
 app.include_router(claims_router)
 app.include_router(health_router)
+app.include_router(admin_router)
 
 load_middleware(app)
 
