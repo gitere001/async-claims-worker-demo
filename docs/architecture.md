@@ -25,7 +25,7 @@ async-claims-worker-demo/
 ├── domains/              ← Everything owned by a specific domain
 ├── repositories/         ← Shared data layer (database models + queries)
 ├── workers/              ← Celery background tasks
-├── core/                 ← Shared infrastructure (database engine, session)
+├── core/                 ← Shared infrastructure (database engine, session, notifications)
 ├── config/               ← App configuration and middleware registration
 ├── middleware/           ← Request logging and CORS
 ├── migrations/           ← Alembic database migrations
@@ -77,6 +77,24 @@ repositories/
 ```
 
 Only repositories talk to the database. No other layer runs SQL queries directly.
+
+---
+
+### core/
+
+Shared infrastructure used by both the API and the workers. Does not belong to any domain.
+
+```
+core/
+├── database/
+│   └── db_context.py       ← Two SQLAlchemy engines (API pool + worker NullPool)
+└── notifications/
+    ├── email_service.py    ← Calls Resend API to send an email
+    └── templates/
+        └── task_failed.py  ← Renders the subject + HTML for a task failure alert
+```
+
+The notifications folder follows a template pattern — `email_service.py` only knows how to send, it never builds HTML. Each template is its own file in `templates/`. Adding a new email type means adding one new template file and calling `send_email()` with the result. Nothing else changes.
 
 ---
 

@@ -244,7 +244,7 @@ The notify worker receives the full picture and uses it to write the final statu
 
 ### The problem without DLQ
 
-Before DLQ was added, if a task failed all its retries the message simply disappeared. No record of what failed, no way to replay it, no alert. A claim could silently vanish from the pipeline with no trace.
+Before DLQ was added, if a task failed all its retries the message simply disappeared. No record of what failed, no way to replay it, no notification. A claim could silently vanish from the pipeline with no trace.
 
 ### How the DLQ works
 
@@ -254,7 +254,7 @@ Every pipeline queue (`validate_claim`, `adjudicate_claim`, `notify_result`) is 
 
 This happens automatically inside RabbitMQ, before any Python code runs. Even if the worker process crashes, the routing still happens.
 
-### The two safety nets
+### The three safety nets
 
 **Safety net 1 — RabbitMQ `dead_letter` queue**
 
@@ -263,6 +263,10 @@ The message lands here and stays until you deal with it. Nothing is lost. You ca
 **Safety net 2 — `failed_tasks` table in PostgreSQL**
 
 Every time a task exhausts all its retries, a row is written to the `failed_tasks` table. This is a permanent, queryable record in your database of every claim that died and exactly why.
+
+**Safety net 3 — Email alert via Resend**
+
+Immediately after saving to `failed_tasks`, an HTML alert email is sent to the configured address. The email shows the task name, claim id, exact error message, number of attempts, and a timestamp. You know about the failure the moment it happens — you do not have to go and query the database to find out something went wrong.
 
 ---
 
@@ -343,6 +347,27 @@ except Exception as save_exc:
 
 The whole thing is wrapped in a `try/except`. If the database is also down at the moment of failure — the worst possible scenario — the save fails silently but the error is logged. The message is still in the RabbitMQ dead letter queue so nothing is truly lost. The database failure does not cause `on_failure` itself to crash.
 
+**Step 5 — Send the alert email**
+
+```python
+from datetime import datetime, timezone
+from core.notifications.templates import task_failed
+from core.notifications.email_service import send_email
+
+subject, html = task_failed.render(
+    task_name=self.name,
+    claim_id=claim_id,
+    error=str(exc),
+    attempts=self.request.retries + 1,
+    failed_at=datetime.now(timezone.utc),
+)
+send_email(subject, html)
+```
+
+This runs in its own separate `try/except`. The email step never blocks or breaks the DB save, and the DB save never blocks or breaks the email. Each step is independent — if one fails the other still runs.
+
+`task_failed.render()` lives in `core/notifications/templates/task_failed.py` and returns the subject line and the full styled HTML. `send_email()` in `core/notifications/email_service.py` calls the Resend API. The template is kept separate from the sending function so that adding new email templates in the future only requires creating a new file in `core/notifications/templates/` — nothing else changes.
+
 ### The dead letter task handler — `workers/core/dead_letter_task.py`
 
 This task listens on the `dead_letter` queue. When a message arrives it logs a full alert:
@@ -368,16 +393,18 @@ validate_claim_task fails
                                                      │
                                              max retries reached
                                                      │
-                              ┌──────────────────────┤
-                              │                      │
-                              ▼                      ▼
-                    dead_letter queue      failed_tasks row in PostgreSQL
-                    (message safe         (task_name, claim_id, error,
-                     in RabbitMQ)          payload, attempts, failed_at)
-                              │
-                              ▼
-                    dead_letter_task runs
-                    logs the alert
+                                             on_failure fires
+                                                     │
+                    ┌────────────────────────────────┼──────────────────────────┐
+                    │                                │                          │
+                    ▼                                ▼                          ▼
+          dead_letter queue            failed_tasks row in PostgreSQL    alert email sent
+          (message safe                (task_name, claim_id, error,      to configured
+           in RabbitMQ)                 payload, attempts, failed_at)    address via Resend
+                    │
+                    ▼
+          dead_letter_task runs
+          logs the alert
 ```
 
 ### How to investigate and replay a failed claim
@@ -437,7 +464,7 @@ As the claim moves through the pipeline, its status in the database changes:
 | Validate fails | `REJECTED` | `validate_claim_task` |
 | Adjudicate task starts | `ADJUDICATING` | `adjudicate_claim_task` |
 | Notify task finishes | `APPROVED` / `PARTIALLY_APPROVED` / `REJECTED` | `notify_result_task` |
-| Task exhausts all retries | recorded in `failed_tasks` | `base_task.on_failure` |
+| Task exhausts all retries | recorded in `failed_tasks`, alert email sent | `base_task.on_failure` |
 
 At any point you can call `GET /app/v1/claims/status/{claim_id}` and see exactly which stage the claim is at.
 
