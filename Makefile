@@ -25,7 +25,7 @@ api:
 	$(VENV)/uvicorn main:app --reload --port 8000
 
 worker:
-	$(VENV)/celery -A worker worker --loglevel=info
+	$(VENV)/celery -A worker worker --loglevel=info --pool=gevent --concurrency=32
 
 flower:
 	$(VENV)/celery -A worker flower --port=5555

@@ -1,6 +1,6 @@
 fastapi
 uvicorn[standard]
-celery[redis]
+celery[redis,gevent]
 redis
 sqlalchemy[asyncio]
 asyncpg
