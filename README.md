@@ -368,6 +368,13 @@ Each domain is a fully independent FastAPI app. Every domain gets its own Swagge
 
 ---
 
+## Detailed Documentation
+
+- [Architecture](docs/architecture.md) — layers, folder structure, design decisions, infrastructure
+- [Workers](docs/workers.md) — how Celery + RabbitMQ work, the three task stages, the claim pipeline
+
+---
+
 ## Learning Outcomes
 
 - Celery + RabbitMQ — task queues, named queues, task routing, result backends
