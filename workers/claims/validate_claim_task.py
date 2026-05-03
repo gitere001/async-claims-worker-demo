@@ -6,9 +6,9 @@ from celery import shared_task
 from sqlalchemy import select
 
 from core.database.db_context import WorkerSessionLocal as AsyncSessionLocal
-from services.claims.database.claim_model import Claim, ClaimStatus
-from services.members.database.member_model import Member, MemberStatus
-from services.providers.database.provider_model import ServiceProvider
+from repositories.claims.database.claim_model import Claim, ClaimStatus
+from repositories.members.database.member_model import Member, MemberStatus
+from repositories.providers.database.provider_model import ServiceProvider
 from workers.core.base_task import TaskBase
 
 logger = logging.getLogger(__name__)

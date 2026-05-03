@@ -19,13 +19,13 @@ config.set_main_option("sqlalchemy.url", os.getenv("DATABASE_URL"))
 
 # Import every model so Alembic can see all tables
 from core.database.db_context import Base
-from services.claims.database.claim_model import Claim, ClaimItem                              # noqa
-from services.members.database.member_model import Member                                      # noqa
-from services.providers.database.provider_model import ServiceProvider                         # noqa
-from services.benefits.database.benefit_type_model import BenefitType                         # noqa
-from services.benefits.database.product_model import Product                                   # noqa
-from services.benefits.database.product_benefit_model import ProductBenefit                    # noqa
-from services.benefits.database.member_benefit_balance_model import MemberBenefitBalance       # noqa
+from repositories.claims.database.claim_model import Claim, ClaimItem                              # noqa
+from repositories.members.database.member_model import Member                                      # noqa
+from repositories.providers.database.provider_model import ServiceProvider                         # noqa
+from repositories.benefits.database.benefit_type_model import BenefitType                         # noqa
+from repositories.benefits.database.product_model import Product                                   # noqa
+from repositories.benefits.database.product_benefit_model import ProductBenefit                    # noqa
+from repositories.benefits.database.member_benefit_balance_model import MemberBenefitBalance       # noqa
 
 target_metadata = Base.metadata
 

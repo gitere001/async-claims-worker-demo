@@ -55,12 +55,12 @@ def _register_models() -> None:
     # claim_model imports Base from here so it cannot be imported again — it is
     # already in sys.modules by the time this runs and will finish loading on its own.
     # We only need to force-load models that nothing else imports automatically.
-    from services.members.database.member_model import Member  # noqa: F401
-    from services.providers.database.provider_model import ServiceProvider  # noqa: F401
-    from services.benefits.database.benefit_type_model import BenefitType  # noqa: F401
-    from services.benefits.database.product_model import Product  # noqa: F401
-    from services.benefits.database.product_benefit_model import ProductBenefit  # noqa: F401
-    from services.benefits.database.member_benefit_balance_model import MemberBenefitBalance  # noqa: F401
+    from repositories.members.database.member_model import Member  # noqa: F401
+    from repositories.providers.database.provider_model import ServiceProvider  # noqa: F401
+    from repositories.benefits.database.benefit_type_model import BenefitType  # noqa: F401
+    from repositories.benefits.database.product_model import Product  # noqa: F401
+    from repositories.benefits.database.product_benefit_model import ProductBenefit  # noqa: F401
+    from repositories.benefits.database.member_benefit_balance_model import MemberBenefitBalance  # noqa: F401
 
 
 _register_models()

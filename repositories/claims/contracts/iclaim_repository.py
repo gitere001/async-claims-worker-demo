@@ -3,7 +3,7 @@ from typing import Optional
 from uuid import UUID
 
 
-class IClaimService(ABC):
+class IClaimRepository(ABC):
 
     @abstractmethod
     async def save_claim(self, data: dict) -> dict: ...

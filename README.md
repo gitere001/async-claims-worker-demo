@@ -38,9 +38,8 @@ The claim status moves through: `PENDING → VALIDATING → ADJUDICATING → APP
 The project is organised in strict layers. Each layer has one responsibility and only talks to the layer below it.
 
 ```
-domains/          ← HTTP layer: routers, controllers, app services, Pydantic models
-proxies/          ← Thin delegation layer between AppService and Service
-services/         ← Business logic, SQLAlchemy models, and all database operations
+domains/          ← Everything owned by a domain: routers, controllers, services, proxies, models
+repositories/     ← Shared data layer: SQLAlchemy models and all database read/write operations
 workers/          ← Celery tasks
 core/             ← Shared: database engines, session factories, Base model
 config/           ← App configuration, router registration, and settings
@@ -51,15 +50,15 @@ middleware/       ← Request logging and CORS
 
 **Router** — receives the HTTP request, calls the controller, returns the response. No logic.
 
-**Controller** — resolves its dependencies from the DI container and delegates to the AppService. No logic.
+**Controller** — resolves its dependencies from the DI container and delegates to the Service. No logic.
 
-**AppService** — coordinates the workflow. Calls the Service to persist data, then fires the next step into RabbitMQ.
+**Service** — coordinates the workflow. Calls the Repository to persist data, then fires the next step into RabbitMQ.
 
-**Proxy** — sits between AppService and Service. Delegates everything today, but is the right place to add logging, metrics, or caching later without touching the service itself.
+**Proxy** — sits between Service and Repository. Delegates everything today, but is the right place to add logging, metrics, or caching later without touching the repository itself.
 
-**Service** — owns the database. All queries and writes happen here.
+**Repository** — owns the database. All SQLAlchemy queries and writes happen here.
 
-**Workers** — Celery tasks. Each task reads from and writes to the database, then fires the next task in the chain.
+**Workers** — Celery tasks. Each task reads from and writes to the database via repositories, then fires the next task in the chain.
 
 ### Sub-app mounting
 
@@ -104,23 +103,22 @@ async-claims-worker-demo/
 │   │   ├── container.py            # Lagom DI container — interface-to-implementation wiring
 │   │   ├── routers/                # HTTP route definitions
 │   │   ├── controllers/            # Thin delegation layer, resolves from container
-│   │   ├── app_services/           # Workflow coordination
+│   │   ├── services/               # Workflow coordination
+│   │   │   └── interfaces/         # IClaimService interface (ABC)
+│   │   ├── proxies/
+│   │   │   └── claim_service_proxy.py  # Proxy wrapping ClaimRepository
 │   │   └── models/                 # Pydantic request/response models
 │   └── health/
 │       ├── app.py                  # Health FastAPI sub-app
+│       ├── proxies/
+│       │   └── health_service_proxy.py # Proxy wrapping HealthService
 │       └── routers/
 │           └── health_router.py    # GET /health — checks DB, RabbitMQ, and Redis
 │
-├── proxies/
+├── repositories/
 │   ├── claims/
-│   │   └── claim_service_proxy.py  # Proxy wrapping ClaimService
-│   └── health/
-│       └── health_service_proxy.py # Proxy wrapping HealthService
-│
-├── services/
-│   ├── claims/
-│   │   ├── claim_service.py        # save_claim, get_claim, update_claim_status
-│   │   ├── contracts/              # IClaimService interface (ABC)
+│   │   ├── claim_repository.py     # save_claim, get_claim, update_claim_status
+│   │   ├── contracts/              # IClaimRepository interface (ABC)
 │   │   └── database/               # Claim + ClaimItem SQLAlchemy models
 │   ├── health/
 │   │   ├── health_service.py       # Runs all three checks concurrently, returns 200 or 503
@@ -357,10 +355,10 @@ Celery tasks use `asyncio.run()` to bridge sync task execution with async databa
 Each pipeline stage runs on a dedicated queue. This allows independent scaling — more adjudication workers can be added during peak hours without affecting the validation queue.
 
 **Why a Proxy layer?**
-The proxy sits between AppService and Service. It delegates everything today but is the right place to add structured logging, metrics, or circuit breakers later without modifying the service.
+The proxy sits between the Service and the Repository. It delegates everything today but is the right place to add structured logging, metrics, or circuit breakers later without modifying the repository.
 
 **Why contracts (interfaces)?**
-All services implement an ABC interface. This enforces what methods must exist and makes every layer testable with a mock implementation. The proxy and app service depend on the interface, not the concrete class.
+All repositories and services implement an ABC interface. This enforces what methods must exist and makes every layer testable with a mock implementation. Each layer depends on the interface, not the concrete class.
 
 **Why a DI container?**
 The container maps interfaces to implementations in one place. Swapping an implementation — for testing or refactoring — requires changing one line in `container.py`, nothing else.
@@ -375,7 +373,7 @@ Each domain is a fully independent FastAPI app. Every domain gets its own Swagge
 - Celery + RabbitMQ — task queues, named queues, task routing, result backends
 - Async SQLAlchemy — async engine, sessions, NullPool, context managers
 - Alembic async migrations — autogenerate, async env setup
-- Domain-Driven Design — domains, services, proxies, contracts, app services
+- Domain-Driven Design — domains, services, repositories, proxies, contracts
 - Dependency injection — Lagom container, interface-to-implementation mapping
 - FastAPI — routers, dependency injection via `Depends`, Pydantic models, sub-app mounting
 - Event-driven architecture — decoupled pipeline where each stage only knows the next

@@ -6,8 +6,8 @@ from celery import shared_task
 from sqlalchemy import select
 
 from core.database.db_context import WorkerSessionLocal as AsyncSessionLocal
-from services.claims.database.claim_model import Claim, ClaimItem, ClaimStatus
-from services.benefits.database.member_benefit_balance_model import MemberBenefitBalance
+from repositories.claims.database.claim_model import Claim, ClaimItem, ClaimStatus
+from repositories.benefits.database.member_benefit_balance_model import MemberBenefitBalance
 from workers.core.base_task import TaskBase
 
 logger = logging.getLogger(__name__)

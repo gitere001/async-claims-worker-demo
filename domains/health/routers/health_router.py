@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from proxies.health.health_service_proxy import HealthServiceProxy
+from domains.health.proxies.health_service_proxy import HealthServiceProxy
 
 router = APIRouter(tags=["Health"])
 

@@ -7,7 +7,7 @@ from domains.claims.models.claim_models import (
 )
 
 
-class IClaimAppService(ABC):
+class IClaimService(ABC):
 
     @abstractmethod
     async def submit_claim(self, request: SubmitClaimRequest) -> SubmitClaimResponse: ...

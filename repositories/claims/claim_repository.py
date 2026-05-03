@@ -4,12 +4,12 @@ from uuid import UUID
 
 from sqlalchemy import select
 
-from services.claims.contracts.iclaim_service import IClaimService
-from services.claims.database.claim_model import Claim, ClaimItem, ClaimStatus
+from repositories.claims.contracts.iclaim_repository import IClaimRepository
+from repositories.claims.database.claim_model import Claim, ClaimItem, ClaimStatus
 from core.database.db_context import DatabaseContext
 
 
-class ClaimService(IClaimService):
+class ClaimRepository(IClaimRepository):
 
     async def save_claim(self, data: dict) -> dict:
         async with DatabaseContext() as ctx:

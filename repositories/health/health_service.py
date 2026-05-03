@@ -3,8 +3,8 @@ from fastapi import status
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 
-from services.health.contracts.ihealth_service import IHealthService
-from services.health.helpers.health_check import check_database, check_rabbitmq, check_redis
+from repositories.health.contracts.ihealth_service import IHealthService
+from repositories.health.helpers.health_check import check_database, check_rabbitmq, check_redis
 
 
 class HealthService(IHealthService):

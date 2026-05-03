@@ -1,5 +1,5 @@
-from services.health.contracts.ihealth_service import IHealthService
-from services.health.health_service import HealthService
+from repositories.health.contracts.ihealth_service import IHealthService
+from repositories.health.health_service import HealthService
 
 
 class HealthServiceProxy(IHealthService):

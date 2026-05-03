@@ -1,10 +1,10 @@
 from lagom import Container
 
-from domains.claims.app_services.claim_app_service import ClaimAppService
-from domains.claims.app_services.interfaces.iclaim_app_service import IClaimAppService
-from proxies.claims.claim_service_proxy import ClaimServiceProxy
-from services.claims.contracts.iclaim_service import IClaimService
+from domains.claims.services.claim_service import ClaimService
+from domains.claims.services.interfaces.iclaim_service import IClaimService
+from domains.claims.proxies.claim_service_proxy import ClaimServiceProxy
+from repositories.claims.contracts.iclaim_repository import IClaimRepository
 
 container = Container()
-container[IClaimService] = ClaimServiceProxy
-container[IClaimAppService] = ClaimAppService
+container[IClaimRepository] = ClaimServiceProxy
+container[IClaimService] = ClaimService

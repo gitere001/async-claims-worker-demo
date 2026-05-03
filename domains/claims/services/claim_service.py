@@ -1,16 +1,16 @@
 from uuid import UUID
-from domains.claims.app_services.interfaces.iclaim_app_service import IClaimAppService
+from domains.claims.services.interfaces.iclaim_service import IClaimService
 from domains.claims.models.claim_models import (
     SubmitClaimRequest,
     SubmitClaimResponse,
     ClaimStatusResponse,
 )
-from services.claims.contracts.iclaim_service import IClaimService
+from repositories.claims.contracts.iclaim_repository import IClaimRepository
 
 
-class ClaimAppService(IClaimAppService):
+class ClaimService(IClaimService):
 
-    def __init__(self, claim_service: IClaimService):
+    def __init__(self, claim_service: IClaimRepository):
         self.claim_service = claim_service
 
     async def submit_claim(self, request: SubmitClaimRequest) -> SubmitClaimResponse:

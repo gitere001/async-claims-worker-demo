@@ -2,12 +2,12 @@ import asyncio
 from datetime import date, datetime, timezone
 from sqlalchemy import text
 from core.database.db_context import AsyncSessionLocal
-from services.members.database.member_model import Member, MemberStatus
-from services.providers.database.provider_model import ServiceProvider, ProviderStatus
-from services.benefits.database.benefit_type_model import BenefitType
-from services.benefits.database.product_model import Product, ProductStatus
-from services.benefits.database.product_benefit_model import ProductBenefit
-from services.benefits.database.member_benefit_balance_model import MemberBenefitBalance
+from repositories.members.database.member_model import Member, MemberStatus
+from repositories.providers.database.provider_model import ServiceProvider, ProviderStatus
+from repositories.benefits.database.benefit_type_model import BenefitType
+from repositories.benefits.database.product_model import Product, ProductStatus
+from repositories.benefits.database.product_benefit_model import ProductBenefit
+from repositories.benefits.database.member_benefit_balance_model import MemberBenefitBalance
 
 POLICY_YEAR = 2024
 

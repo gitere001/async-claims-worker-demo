@@ -1,6 +1,6 @@
 from uuid import UUID
 from lagom import Container
-from domains.claims.app_services.interfaces.iclaim_app_service import IClaimAppService
+from domains.claims.services.interfaces.iclaim_service import IClaimService
 from domains.claims.models.claim_models import (
     SubmitClaimRequest,
     SubmitClaimResponse,
@@ -11,7 +11,7 @@ from domains.claims.models.claim_models import (
 class ClaimController:
 
     def __init__(self, container: Container) -> None:
-        self.app_service = container.resolve(IClaimAppService)
+        self.app_service = container.resolve(IClaimService)
 
     async def submit_claim(self, request: SubmitClaimRequest) -> SubmitClaimResponse:
         return await self.app_service.submit_claim(request)

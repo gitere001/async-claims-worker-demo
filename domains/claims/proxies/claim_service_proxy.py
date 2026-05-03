@@ -1,13 +1,13 @@
 from typing import Optional
 from uuid import UUID
-from services.claims.contracts.iclaim_service import IClaimService
-from services.claims.claim_service import ClaimService
+from repositories.claims.contracts.iclaim_repository import IClaimRepository
+from repositories.claims.claim_repository import ClaimRepository
 
 
-class ClaimServiceProxy(IClaimService):
+class ClaimServiceProxy(IClaimRepository):
 
     def __init__(self):
-        self.service = ClaimService()
+        self.service = ClaimRepository()
 
     async def save_claim(self, data: dict) -> dict:
         return await self.service.save_claim(data)
