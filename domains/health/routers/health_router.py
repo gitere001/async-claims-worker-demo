@@ -1,13 +1,15 @@
 from fastapi import APIRouter, Response, status
 from domains.health.proxies.health_service_proxy import HealthServiceProxy
 from domains.health.models.health_models import HealthResponse
+from core.responses.api_response import ApiResponse
 
 router = APIRouter(tags=["Health"])
 
 
-@router.get("/", response_model=HealthResponse)
+@router.get("/", response_model=ApiResponse[HealthResponse])
 async def health_check(response: Response):
     result = await HealthServiceProxy().health_checker()
     if not result.is_healthy:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
-    return result
+        return ApiResponse(success=False, message="One or more health checks failed", data=result)
+    return ApiResponse.ok(result, "All systems healthy")

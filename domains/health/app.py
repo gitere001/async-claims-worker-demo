@@ -1,6 +1,5 @@
-from fastapi import FastAPI
-from config.app_config import health_api_config
+from fastapi import APIRouter
 from domains.health.routers.health_router import router as health_router
 
-health_app = FastAPI(**health_api_config.model_dump())
-health_app.include_router(health_router)
+router = APIRouter(prefix="/app/v1/health")
+router.include_router(health_router)

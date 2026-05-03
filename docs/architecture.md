@@ -133,19 +133,20 @@ No manual construction anywhere. Swapping an implementation means changing one l
 
 ---
 
-## Sub-app mounting
+## Router mounting
 
-Each domain is mounted as an independent FastAPI app:
+Each domain exports an `APIRouter` with its own prefix. `main.py` includes both routers into the single root `FastAPI` app:
 
 ```
-main.py mounts:
-  /app/v1/claims  →  domains/claims/app.py
-  /app/v1/health  →  domains/health/app.py
+main.py includes:
+  /app/v1/claims  →  domains/claims/app.py  (APIRouter)
+  /app/v1/health  →  domains/health/app.py  (APIRouter)
 ```
 
-Each domain gets its own Swagger docs page:
-- `http://localhost:8000/app/v1/claims/docs`
-- `http://localhost:8000/app/v1/health/docs`
+All endpoints appear in one unified Swagger page:
+- `http://localhost:8000/docs`
+
+The `Claims` and `Health` sections are separated by tags so the page stays readable.
 
 ---
 

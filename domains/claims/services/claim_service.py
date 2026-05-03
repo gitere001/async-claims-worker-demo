@@ -6,6 +6,7 @@ from domains.claims.models.claim_models import (
     ClaimStatusResponse,
 )
 from repositories.claims.contracts.iclaim_repository import IClaimRepository
+from core.exceptions.app_exceptions import ClaimNotFoundException
 
 
 class ClaimService(IClaimService):
@@ -27,6 +28,8 @@ class ClaimService(IClaimService):
 
     async def get_claim_status(self, claim_id: UUID) -> ClaimStatusResponse:
         claim = await self.claim_repository.get_claim(claim_id)
+        if not claim:
+            raise ClaimNotFoundException()
         return ClaimStatusResponse(
             claim_id=claim_id,
             status=claim.get("status", "UNKNOWN"),
