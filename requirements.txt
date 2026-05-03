@@ -11,3 +11,4 @@ alembic
 pika
 starlette
 lagom
+resend
