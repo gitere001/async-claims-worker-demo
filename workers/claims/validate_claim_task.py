@@ -11,6 +11,7 @@ from repositories.members.database.member_model import Member, MemberStatus
 from repositories.providers.database.provider_model import ServiceProvider
 from workers.core.base_task import TaskBase
 from workers.core.exceptions import NonRetryableError, RetryableError
+from core.circuit_breaker import db_circuit, CircuitOpenError
 
 logger = logging.getLogger(__name__)
 
@@ -84,15 +85,15 @@ async def _validate(claim_data: dict) -> dict | None:
 @shared_task(queue="validate_claim", name="validate_claim_task", bind=True, base=TaskBase)
 def validate_claim_task(self: TaskBase, claim_data: dict) -> dict:
     try:
-        result = asyncio.run(_validate(claim_data))
+        result = db_circuit.call(asyncio.run, _validate(claim_data))
     except ValueError as e:
-        # Business rule failure — claim already marked REJECTED in DB, do not retry
         logger.error("VALIDATE FAILED | %s", e)
         return claim_data
+    except CircuitOpenError as e:
+        raise RetryableError(str(e)) from e
     except (NonRetryableError, RetryableError):
-        raise  # Let TaskBase handle — NonRetryable goes to on_failure, Retryable gets retried
+        raise
     except Exception as e:
-        # Unexpected infrastructure error — wrap and retry
         raise RetryableError(str(e)) from e
 
     if result is None:

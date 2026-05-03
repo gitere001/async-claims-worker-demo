@@ -10,6 +10,7 @@ from repositories.claims.database.claim_model import Claim, ClaimItem, ClaimStat
 from repositories.benefits.database.member_benefit_balance_model import MemberBenefitBalance
 from workers.core.base_task import TaskBase
 from workers.core.exceptions import NonRetryableError, RetryableError
+from core.circuit_breaker import db_circuit, CircuitOpenError
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +106,9 @@ async def _adjudicate(claim_data: dict) -> dict:
 @shared_task(queue="adjudicate_claim", name="adjudicate_claim_task", bind=True, base=TaskBase)
 def adjudicate_claim_task(self: TaskBase, claim_data: dict) -> dict:
     try:
-        result = asyncio.run(_adjudicate(claim_data))
+        result = db_circuit.call(asyncio.run, _adjudicate(claim_data))
+    except CircuitOpenError as e:
+        raise RetryableError(str(e)) from e
     except (NonRetryableError, RetryableError):
         raise
     except Exception as e:

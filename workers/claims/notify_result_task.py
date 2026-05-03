@@ -9,6 +9,7 @@ from core.database.db_context import WorkerSessionLocal as AsyncSessionLocal
 from repositories.claims.database.claim_model import Claim, ClaimStatus
 from workers.core.base_task import TaskBase
 from workers.core.exceptions import NonRetryableError, RetryableError
+from core.circuit_breaker import db_circuit, CircuitOpenError
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +58,9 @@ async def _notify(claim_data: dict) -> None:
 @shared_task(queue="notify_result", name="notify_result_task", bind=True, base=TaskBase)
 def notify_result_task(self: TaskBase, claim_data: dict) -> None:
     try:
-        asyncio.run(_notify(claim_data))
+        db_circuit.call(asyncio.run, _notify(claim_data))
+    except CircuitOpenError as e:
+        raise RetryableError(str(e)) from e
     except (NonRetryableError, RetryableError):
         raise
     except Exception as e:
