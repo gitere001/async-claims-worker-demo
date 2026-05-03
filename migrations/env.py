@@ -26,6 +26,7 @@ from repositories.benefits.database.benefit_type_model import BenefitType       
 from repositories.benefits.database.product_model import Product                                   # noqa
 from repositories.benefits.database.product_benefit_model import ProductBenefit                    # noqa
 from repositories.benefits.database.member_benefit_balance_model import MemberBenefitBalance       # noqa
+from repositories.tasks.database.failed_task_model import FailedTask                               # noqa
 
 target_metadata = Base.metadata
 

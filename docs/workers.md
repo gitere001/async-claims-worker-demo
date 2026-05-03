@@ -68,9 +68,9 @@ Terminal 1 drops messages in. Terminal 2 picks messages out. RabbitMQ is the pos
 
 ---
 
-## The four queues
+## The queues
 
-The worker listens on four queues simultaneously. These are defined in `worker.py`:
+The worker listens on five queues simultaneously. These are defined in `worker.py`:
 
 | Queue | Purpose |
 |---|---|
@@ -78,8 +78,40 @@ The worker listens on four queues simultaneously. These are defined in `worker.p
 | `validate_claim` | Stage 1 — member and provider checks |
 | `adjudicate_claim` | Stage 2 — benefit balance checks and deductions |
 | `notify_result` | Stage 3 — final status write and logging |
+| `dead_letter` | Catches any message that failed all its retries |
 
-Each stage of the pipeline has its own dedicated queue. This means in production you could run more workers listening only on `adjudicate_claim` during peak hours without affecting the other stages.
+Each pipeline queue (`validate_claim`, `adjudicate_claim`, `notify_result`) is configured with a **dead letter exchange**. If a message is rejected after exhausting all retries, RabbitMQ automatically routes it to the `dead_letter` queue. Nothing is ever lost.
+
+---
+
+## The happy path — full pipeline
+
+```
+API saves claim (status=PENDING)
+        │
+        └──► validate_claim queue
+                    │
+             validate_claim_task runs
+             member active? provider registered?
+                    │
+             ┌──────┴──────┐
+           PASS           FAIL → status=REJECTED → pipeline stops
+             │
+             └──► adjudicate_claim queue
+                        │
+                 adjudicate_claim_task runs
+                 benefit balances covered?
+                        │
+                 ┌──────┴──────┐
+               PASS          FAIL → status=REJECTED / PARTIALLY_APPROVED
+                 │
+                 └──► notify_result queue
+                            │
+                     notify_result_task runs
+                     writes final status → APPROVED
+                     logs summary
+                     pipeline complete
+```
 
 ---
 
@@ -117,7 +149,7 @@ Each stage of the pipeline has its own dedicated queue. This means in production
 3. Sets status to `ADJUDICATING`.
 4. Groups all items by `benefit_code` and sums the amounts. For example if a claim has two OUTPATIENT items worth 2000 and 1500, they become `{"OUTPATIENT": 3500}`.
 5. For each benefit code, queries `MemberBenefitBalance` to check:
-   - Does this member have this benefit in their plan? (e.g. does a BASIC plan member have DENTAL coverage?)
+   - Does this member have this benefit in their plan?
    - Is the remaining balance enough to cover the amount?
 6. For every benefit that passes both checks, deducts the amount from `used_amount`, reduces `remaining_amount`, and adds to `approved_amount`.
 7. For every benefit that fails, records the reason in `rejected_items`.
@@ -166,7 +198,7 @@ There is no next task. This is the end of the pipeline.
 The same Python dict starts in the repository and travels through all three workers. Each worker adds fields to it.
 
 After the repository saves the claim:
-```
+```json
 {
   "id": "1c29e729-...",
   "member_number": "1524100",
@@ -177,7 +209,7 @@ After the repository saves the claim:
 ```
 
 After validate_claim_task:
-```
+```json
 {
   "id": "1c29e729-...",
   "member_number": "1524100",
@@ -190,7 +222,7 @@ After validate_claim_task:
 ```
 
 After adjudicate_claim_task:
-```
+```json
 {
   "id": "1c29e729-...",
   "member_number": "1524100",
@@ -205,6 +237,155 @@ After adjudicate_claim_task:
 ```
 
 The notify worker receives the full picture and uses it to write the final status and log the summary.
+
+---
+
+## Production safety — Dead Letter Queue (DLQ)
+
+### The problem without DLQ
+
+Before DLQ was added, if a task failed all its retries the message simply disappeared. No record of what failed, no way to replay it, no alert. A claim could silently vanish from the pipeline with no trace.
+
+### How the DLQ works
+
+Every pipeline queue (`validate_claim`, `adjudicate_claim`, `notify_result`) is configured with a **dead letter exchange (DLX)**. This is an instruction to RabbitMQ at the infrastructure level:
+
+> "If a message in this queue is rejected after all retries, do not drop it — route it to the `dead_letter` queue instead."
+
+This happens automatically inside RabbitMQ, before any Python code runs. Even if the worker process crashes, the routing still happens.
+
+### The two safety nets
+
+**Safety net 1 — RabbitMQ `dead_letter` queue**
+
+The message lands here and stays until you deal with it. Nothing is lost. You can see it in the RabbitMQ dashboard at `http://localhost:15672`.
+
+**Safety net 2 — `failed_tasks` table in PostgreSQL**
+
+Every time a task exhausts all its retries, a row is written to the `failed_tasks` table. This is a permanent, queryable record in your database of every claim that died and exactly why.
+
+---
+
+### How the failed_tasks save actually works — step by step
+
+This all happens inside `workers/core/base_task.py` in the `on_failure` method.
+
+**What is `on_failure`?**
+
+Celery calls `on_failure` automatically on every task that has inherited from `TaskBase` — which is every task in this project. You never call it yourself. When a task throws an exception and has no retries left, Celery calls `on_failure` before the message moves to the dead letter queue.
+
+**Step 1 — Extract the payload and claim id**
+
+```python
+payload = args[0] if args else {}
+claim_id = payload.get("id") if isinstance(payload, dict) else None
+```
+
+`args` is a tuple of the arguments the task was called with. Every task in this project receives one argument — the claim dict. So `args[0]` is that dict. From it we pull the `id` field which is the claim UUID. If for any reason the payload is not a dict or is empty, `claim_id` is just `None` — the save still happens, just without a claim id.
+
+**Step 2 — Log the failure immediately**
+
+```python
+logger.error(
+    "TASK DEAD | task=%s | task_id=%s | claim_id=%s | error=%s",
+    self.name, task_id, claim_id, exc,
+)
+```
+
+This logs to the worker terminal right away. Even if the database save fails in the next step, this line means the failure is always visible in the worker logs.
+
+**Step 3 — Define the async save function**
+
+```python
+async def _save_failure():
+    from repositories.tasks.database.failed_task_model import FailedTask
+    from core.database.db_context import WorkerSessionLocal
+
+    async with WorkerSessionLocal() as session:
+        session.add(FailedTask(
+            task_id=task_id,
+            task_name=self.name,
+            claim_id=claim_id,
+            error=str(exc),
+            payload=payload if isinstance(payload, dict) else None,
+            attempts=self.request.retries + 1,
+        ))
+        await session.commit()
+```
+
+This is an inner async function defined inside `on_failure`. It uses `WorkerSessionLocal` — the NullPool engine — because `on_failure` runs inside the worker process where each operation needs a fresh database connection.
+
+The imports (`FailedTask`, `WorkerSessionLocal`) are inside the function for the same reason as the task chain imports — to avoid circular imports at module load time.
+
+Each field being saved:
+
+| Field | Where the value comes from |
+|---|---|
+| `task_id` | Celery's unique ID for this specific task execution — passed in by Celery automatically |
+| `task_name` | `self.name` — the registered name of the task e.g. `validate_claim_task` |
+| `claim_id` | Extracted from `payload["id"]` in Step 1 |
+| `error` | `str(exc)` — the full exception message |
+| `payload` | The entire dict the task received — so you have everything needed to replay it |
+| `attempts` | `self.request.retries + 1` — how many times it was tried. `retries` is zero-indexed so we add 1 |
+
+`failed_at` is not set here — the model sets it automatically via `default=lambda: datetime.now(timezone.utc)`.
+
+**Step 4 — Run the async function from synchronous code**
+
+```python
+try:
+    asyncio.run(_save_failure())
+except Exception as save_exc:
+    logger.error("FAILED to save dead task to DB | %s", save_exc)
+```
+
+`on_failure` is a regular synchronous method — Celery calls it synchronously. But `_save_failure` uses `await` because SQLAlchemy async requires it. So `asyncio.run()` creates a fresh event loop, runs `_save_failure` to completion, and destroys the loop. This is the same pattern used in all the worker tasks.
+
+The whole thing is wrapped in a `try/except`. If the database is also down at the moment of failure — the worst possible scenario — the save fails silently but the error is logged. The message is still in the RabbitMQ dead letter queue so nothing is truly lost. The database failure does not cause `on_failure` itself to crash.
+
+### The dead letter task handler — `workers/core/dead_letter_task.py`
+
+This task listens on the `dead_letter` queue. When a message arrives it logs a full alert:
+
+```
+============================================================
+  DEAD LETTER MESSAGE RECEIVED
+  Claim ID     : 1c29e729-...
+  Member       : 1524100
+  Full payload : {...}
+  Action       : inspect failed_tasks table to investigate
+============================================================
+```
+
+This task lives in `workers/core/` — not inside any specific domain — because the dead letter queue catches failures from any worker in the system, not just claims.
+
+### The full failure flow
+
+```
+validate_claim_task fails
+        │
+        retry 1 → retry 2 → retry 3 → retry 4 → retry 5
+                                                     │
+                                             max retries reached
+                                                     │
+                              ┌──────────────────────┤
+                              │                      │
+                              ▼                      ▼
+                    dead_letter queue      failed_tasks row in PostgreSQL
+                    (message safe         (task_name, claim_id, error,
+                     in RabbitMQ)          payload, attempts, failed_at)
+                              │
+                              ▼
+                    dead_letter_task runs
+                    logs the alert
+```
+
+### How to investigate and replay a failed claim
+
+1. Query the `failed_tasks` table to find the failed claim
+2. Read the `error` and `payload` columns to understand what went wrong
+3. Fix the bug or data issue
+4. Take the `payload` from the `failed_tasks` row and re-submit it by calling `validate_claim_task.delay(payload)` directly
 
 ---
 
@@ -233,11 +414,15 @@ This is intentional. If the tasks imported each other at the top of the file, Py
 
 ---
 
-## What happens when a task fails
+## What happens when a task fails — retry logic
 
-The base task class in `workers/core/base_task.py` handles failures. If a task throws an exception it will be retried automatically with exponential backoff — it waits longer between each retry. After the maximum number of retries it gives up and logs the failure.
+The base task class in `workers/core/base_task.py` handles all failures:
 
-`acks_late=True` means the message is not removed from RabbitMQ until the task completes successfully. If the worker crashes mid-task, the message stays in RabbitMQ and will be picked up again when the worker restarts. No messages are lost.
+- `max_retries = 5` — tries up to 5 times before giving up
+- `retry_backoff = True` — waits longer between each retry (exponential backoff)
+- `retry_jitter = True` — adds a small random delay to avoid all retries hitting the DB at the same moment
+- `acks_late = True` — the message is NOT removed from RabbitMQ until the task completes successfully. If the worker crashes mid-task, the message stays in RabbitMQ and will be picked up again when the worker restarts
+- `reject_on_worker_lost = True` — if the worker process dies unexpectedly, the message is rejected and re-queued rather than silently lost
 
 ---
 
@@ -252,19 +437,29 @@ As the claim moves through the pipeline, its status in the database changes:
 | Validate fails | `REJECTED` | `validate_claim_task` |
 | Adjudicate task starts | `ADJUDICATING` | `adjudicate_claim_task` |
 | Notify task finishes | `APPROVED` / `PARTIALLY_APPROVED` / `REJECTED` | `notify_result_task` |
+| Task exhausts all retries | recorded in `failed_tasks` | `base_task.on_failure` |
 
 At any point you can call `GET /app/v1/claims/status/{claim_id}` and see exactly which stage the claim is at.
 
 ---
 
-## Monitoring the workers
+## Monitoring
 
 ### RabbitMQ Dashboard
 Open `http://localhost:15672` in your browser (login: guest / guest).
 
-Shows every queue, how many messages are waiting, how many are being processed, and how many consumers are connected. If a queue is growing and not shrinking, your worker is not keeping up or has crashed.
+Shows every queue, how many messages are waiting, how many are being processed, and how many consumers are connected. If a queue is growing and not shrinking, your worker is not keeping up or has crashed. If the `dead_letter` queue has messages, something in your pipeline is failing — investigate immediately.
 
 ### Flower
 Run `make flower` then open `http://localhost:5555`.
 
 Shows every task that has run — success, failure, how long it took, what arguments it received. This is the best tool for debugging why a specific claim did not process correctly.
+
+### failed_tasks table
+Query directly in PostgreSQL to see every message that died:
+
+```sql
+SELECT task_name, claim_id, error, attempts, failed_at
+FROM failed_tasks
+ORDER BY failed_at DESC;
+```

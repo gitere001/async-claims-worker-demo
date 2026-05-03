@@ -61,6 +61,7 @@ def _register_models() -> None:
     from repositories.benefits.database.product_model import Product  # noqa: F401
     from repositories.benefits.database.product_benefit_model import ProductBenefit  # noqa: F401
     from repositories.benefits.database.member_benefit_balance_model import MemberBenefitBalance  # noqa: F401
+    from repositories.tasks.database.failed_task_model import FailedTask  # noqa: F401
 
 
 _register_models()
